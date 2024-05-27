@@ -1,113 +1,101 @@
-# Author: lindaye
-# Update:2023-11-26
-# 慈云数据VPS
-# 活动入口：TG内部群
-# 添加账号说明(青龙/本地)二选一
-#   青龙: 青龙变量cytoken 值{"user":"xxxxxxxx","pass":"xxxxx"} 一行一个(回车分割)
-#   本地: 脚本内置ck方法ck_token = [{"user":"xxxxxxxx","pass":"xxxxx"},{"user":"xxxxxxxx","pass":"xxxxx"}]
-# 软件版本
-version = "0.0.1"
-name = "慈云数据VPS"
-linxi_token = "cytoken"
-linxi_tips = '{"user":"xxxxxxxx","pass":"xxxxx"}'
-import requests
-import json
+# !/usr/bin/python3
+# -*- coding: utf-8 -*-
+# -------------------------------
+# @Author : Code.K
+# cron "1 0,11 * * *" script-path=xxx.py,tag=匹配cron用 定时建议一天2次
+# const $ = new Env('联通阅读')
+# 活动信息: 联通阅读专区 - 阅光宝盒(阅读得话费)、阅读打卡(抽5G流量和话费)
+# 环境变量 unicomnum 填 手机号（没错，就是需要号码就行，不需要抓包！）
+# 多账号 @ 分开
+# 
+
+import random
 import os
-import re
-from multiprocessing import Pool
+import sys
+import platform
+import subprocess
+import time
 
-# 变量类型(本地/青龙)
-Btype = "青龙"
-# 域名(无法使用时请更换)
-domain = 'https://www.zovps.com'
-# 保持连接,重复利用
-ss = requests.session()
-headers = {
-    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.39 (0x18002733) NetType/WIFI Language/zh_CN',
-    'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'
-}
+from functools import partial
+import concurrent.futures
 
-def user_info(i,ck):
-    token = re.findall('<input type="hidden" name="token" value="(.*?)">',ss.get(domain+"/login",headers=headers).text)[0]
-    data = {'token': token,'email': ck['user'],'password': ck['pass'],}
-    result = ss.post(domain+"/login?action=email",headers=headers,data=data,allow_redirects=False)
-    result = ss.get(domain+"/clientarea",headers=headers)
-    userid = re.findall('email">(.*?)</span>',result.text)
-    balance = re.findall(r'<h1>(.*?)</h1>', result.text)
-    if userid:
-        result = ss.post(domain+"/addons?_plugin=70&_controller=index&_action=index",headers=headers, data={'uid': f'{userid[0]}','type': 'point'}).json()
-        jifen = re.findall(r'\d+', result['msg'])[0]
-        print(f"账号【{i+1}】[{ck['name']}] ✅ 账户:{userid[0]} 余额:{balance[0]} 积分:{jifen}")
+token = os.environ.get("unicomnum")
+if token is None:
+    print(f'⛔️未获取到ck：请检查变量是否填写 变量名：unicomnum')
+    exit(0)
+
+if '@' in token:
+    tokens = token.split('@')
+else:
+    tokens = [token]
+
+
+print(f'✅获取到{len(tokens)}个账号')
+
+file_url = 'https://mirror.ghproxy.com/https://raw.githubusercontent.com/Code-KKK/pycode/main/compiled/'
+tools_dir = "tools"
+sys.path.append(tools_dir)
+
+def check_environment(file_name):
+    v, o, a = sys.version_info, platform.system(), platform.machine()
+    print(f"Python版本: {v.major}.{v.minor}.{v.micro}, 操作系统类型: {o}, 处理器架构: {a}")
+    if (v.minor in [8,9,10,11]) and o.lower() in ['linux'] and a.lower() in ['x86_64','aarch64']:
+        print("当前环境符合运行要求")
+        if o.lower() == 'linux':
+            file_name += '.so'
+            main_run(file_name, v.minor, o.lower(), a.lower())
     else:
-        print(f"账号【{i+1}】请检查账号密码是否错误!")
+        if not (v.minor in [8,9,10,11]):
+            print("不符合运行要求: Python版本不是 3.8 ~ 3.11")
+        if not (o.lower() in ['linux']):
+            print(f"不符合运行要求: 操作系统类型[{o}] 支持：Linux")
+        if not (a.lower() in ['x86_64','aarch64']):
+            print(f"不符合运行要求: 当前处理器架构[{a}] 支持：x86_64 aarch64")
 
-
-def do_read(i,ck):
-    token = re.findall('<input type="hidden" name="token" value="(.*?)">',ss.get(domain+"/login",headers=headers).text)[0]
-    data = {'token': token,'email': ck['user'],'password': ck['pass'],}
-    result = ss.post(domain+"/login?action=email",headers=headers,data=data,allow_redirects=False)
-    result = ss.get(domain+"/clientarea",headers=headers)
-    userid = re.findall('email">(.*?)</span>',result.text)
-    balance = re.findall(r'<h1>(.*?)</h1>', result.text)
-    if userid:
-        result = ss.post(domain+"/addons?_plugin=70&_controller=index&_action=index",headers=headers, data={'uid': f'{userid[0]}'}).json()
-        print(f"账号【{i+1}】[{ck['name']}] ✅ 今日签到:{result['msg']}")
+def main_run(file_name, py_v, os_info, cpu_info):
+    if not os.path.exists(tools_dir):
+        os.makedirs(tools_dir)
+    encrypt_symmetric_file = os.path.join(tools_dir, "encrypt_symmetric.py")
+    if not os.path.exists(encrypt_symmetric_file):
+        open('tools/__init__.py', "w").close()
+        print(f'本地不存在依赖文件，即将下载依赖文件')
+        encryptfile_url = "https://mirror.ghproxy.com/https://raw.githubusercontent.com/Code-KKK/pycode/main/tools/encrypt_symmetric.py"
+        subprocess.run(["curl", "-o", encrypt_symmetric_file, encryptfile_url])
+    if os.path.exists(file_name):
+        file_name_ = os.path.splitext(file_name)[0]
+        try:
+            Code_module = __import__(file_name_)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                for num in range(len(tokens)):
+                    run = Code_module.China_Unicom(tokens[num])
+                    executor.submit(run.main)
+                    time.sleep(random.randint(2, 3))
+        except Exception as e:
+            print(str(e)) #打印运行报错信息
+            if 'ld-linux-aarch64.so' in str(e):
+                print('检测当前系统环境缺失ld-linux-aarch64.so.1请在库里lib目录下载修复ld-linux-aarch64.so.1.sh运行')
     else:
-        print(f"账号【{i+1}】请检查账号密码是否错误!")
+        print(f"不存在{file_name}功能模块,准备下载模块文件")
+        download_file(file_name, py_v, os_info, cpu_info,file_url)
 
-def handle_exception(e,i):
-    print(f"账号【{i+1}】🆘 程序出现异常:", e)
-
-def process_wrapper(func, args):
+def download_file(file_name, py_v, os_info, cpu_info, url):
+    file_name_ = os.path.splitext(file_name)[0]
+    if os_info == 'linux':
+        url = url + f'{file_name_}/{file_name_}.cp3{py_v}-{cpu_info}-{os_info}.so'
     try:
-        func(*args)
-    except Exception as e:
-        handle_exception(e,args[0])
+        print(url)
+        result = subprocess.run(['curl', '-I', '-s', '-o', '/dev/null', '-w', '%{http_code}', url], capture_output=True, text=True)
+        if result.stdout.strip() == '404':
+            print('服务器文件不存在,已停止下载')
+        else:
+            print('服务器文件存在，将开始下载')
+            subprocess.run(["curl",'-#',"-o", file_name, url], check=True)
+            print(f"{file_name}文件下载成功~开始执行~")
+            check_environment(file_name_)
+    except subprocess.CalledProcessError:
+        print("下载失败，请检查 URL 或 网络问题。")
 
-if __name__ == "__main__":
-    print(f"""██╗     ██╗███╗   ██╗██╗  ██╗      ██████╗██╗   ██╗███████╗ ██████╗ 
-██║     ██║████╗  ██║╚██╗██╔╝     ██╔════╝╚██╗ ██╔╝╚══███╔╝██╔═══██╗
-██║     ██║██╔██╗ ██║ ╚███╔╝█████╗██║      ╚████╔╝   ███╔╝ ██║   ██║
-██║     ██║██║╚██╗██║ ██╔██╗╚════╝██║       ╚██╔╝   ███╔╝  ██║   ██║
-███████╗██║██║ ╚████║██╔╝ ██╗     ╚██████╗   ██║   ███████╗╚██████╔╝
-╚══════╝╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝      ╚═════╝   ╚═╝   ╚══════╝ ╚═════╝ 
-    项目:{name}           BY-林夕          Verion: {version}(并发)
-    Github仓库地址: https://github.com/linxi-520/LinxiPush
-""")
-    if Btype == "青龙":
-        if os.getenv(linxi_token) == None:
-            print(f'⛔ 青龙变量异常: 请添加{linxi_token}变量示例:{linxi_tips} 确保一行一个')
-            exit()
-        # 变量CK列表
-        #ck_token = [json.loads(line) for line in os.getenv(linxi_token).splitlines()]
-        ck_token = [json.loads(li) if "&" in line else json.loads(line) for line in os.getenv(linxi_token).splitlines() for li in re.findall(r'{.*?}', line)]
-    else:
-        # 本地CK列表
-        ck_token = [
-            # 这里填写本地变量
-            {"ck":"xxx"}
-        ]
-        if ck_token == []:
-            print(f'⛔ 本地变量异常: 请添加本地ck_token示例:{linxi_tips}')
-            exit()
-    # 创建进程池
-    with Pool() as pool:
-        print("==================👻获取账号信息👻=================")
-        pool.starmap(process_wrapper, [(user_info, (i, ck)) for i, ck in enumerate(ck_token)])
-        print("==================💫开始执行任务💫=================")
-        pool.starmap(process_wrapper, [(do_read, (i, ck)) for i, ck in enumerate(ck_token)])
-        # print("==================🐣获取账号信息🐣=================")
-        # pool.starmap(process_wrapper, [(user_info, (i, ck)) for i, ck in enumerate(ck_token)])
-        # print("==================🐋开始账号提现🐋=================")
-        # pool.starmap(process_wrapper, [(get_money, (i, ck)) for i, ck in enumerate(ck_token)])
-
-
-        # 关闭进程池
-        pool.close()
-        # 等待所有子进程执行完毕
-        pool.join()
-
-        # 关闭连接
-        ss.close
-        # 输出结果
-        print(f"================[{name}V{version}]===============")
+if __name__ == '__main__':
+    print = partial(print, flush=True)
+    check_environment("unicom")
+    print('【联通阅读】运行完成！')
